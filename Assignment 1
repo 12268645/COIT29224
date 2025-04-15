@@ -1,0 +1,134 @@
+# Updated PSO code with 3 hyperparameters: learning_rate, hidden_layer_size, alpha
+
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import accuracy_score
+
+# === Load dataset for Data Preprocessing ===
+data = load_breast_cancer()
+X, y = data.data, data.target
+X = StandardScaler().fit_transform(X)
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# === PSO Hyperparameters ===
+SWARM_SIZE = 10
+DIMENSIONS = 3  # [learning rate, hidden layer size, alpha]
+INFORMANTS = 3
+NUM_GENERATIONS = 20
+W, C1, C2 = 0.729, 1.49, 1.49
+MIN_BOUNDARY = [0.0001, 5, 0.0001]
+MAX_BOUNDARY = [0.1, 100, 0.1]
+
+fitness_history = []
+
+# === Fitness Function ===
+
+def fitness_function(position):
+    lr = position[0]
+    hidden = int(position[1])
+    alpha = position[2]
+    hidden = max(1, hidden)
+    clf = MLPClassifier(hidden_layer_sizes=(hidden,),
+                        learning_rate_init=lr,
+                        alpha=alpha,
+                        max_iter=200,
+                        solver='adam',
+                        random_state=42)
+    clf.fit(X_train, y_train)
+    pred = clf.predict(X_val)
+    acc = accuracy_score(y_val, pred)
+    return 1 - acc  # minimize error
+
+# === Particle Class ===
+class Particle:
+    def __init__(self):
+        self.position = [random.uniform(MIN_BOUNDARY[d], MAX_BOUNDARY[d]) for d in range(DIMENSIONS)]
+        self.velocity = [random.uniform(-1, 1) for _ in range(DIMENSIONS)]
+        self.fitness = fitness_function(self.position)
+        self.best_position = list(self.position)
+        self.best_fitness = self.fitness
+        self.informants = random.sample(range(SWARM_SIZE), INFORMANTS)
+        self.group_best_position = list(self.position)
+        self.group_best_fitness = self.fitness
+
+    def update_velocity(self):
+        for d in range(DIMENSIONS):
+            r1, r2 = random.random(), random.random()
+            cognitive = C1 * r1 * (self.best_position[d] - self.position[d])
+            social = C2 * r2 * (self.group_best_position[d] - self.position[d])
+            self.velocity[d] = W * self.velocity[d] + cognitive + social
+
+    def update_position(self):
+        for d in range(DIMENSIONS):
+            self.position[d] += self.velocity[d]
+            self.position[d] = max(MIN_BOUNDARY[d], min(MAX_BOUNDARY[d], self.position[d]))
+        self.fitness = fitness_function(self.position)
+        if self.fitness < self.best_fitness:
+            self.best_fitness = self.fitness
+            self.best_position = list(self.position)
+
+    def update_group_best(self, swarm):
+        best_informant = min(self.informants, key=lambda i: swarm[i].best_fitness)
+        if swarm[best_informant].best_fitness < self.group_best_fitness:
+            self.group_best_fitness = swarm[best_informant].best_fitness
+            self.group_best_position = list(swarm[best_informant].best_position)
+
+# === PSO Main Loop ===
+swarm = [Particle() for _ in range(SWARM_SIZE)]
+
+for gen in range(NUM_GENERATIONS):
+    for particle in swarm:
+        particle.update_group_best(swarm)
+        particle.update_velocity()
+        particle.update_position()
+    best_fitness = min(p.fitness for p in swarm)
+    fitness_history.append(best_fitness)
+
+# Output best results
+print("Best fitness (1 - accuracy):", best_fitness)
+best_particle = min(swarm, key=lambda p: p.fitness)
+print("Best hyperparameters found:", best_particle.best_position)
+
+from sklearn.model_selection import GridSearchCV
+
+# Define parameter grid
+param_grid = {
+    'hidden_layer_sizes': [(5,), (10,), (20,), (50,), (100,)],
+    'learning_rate_init': [0.0001, 0.001, 0.01, 0.1],
+    'alpha': [0.0001, 0.001, 0.01, 0.1]
+}
+
+mlp = MLPClassifier(max_iter=200, solver='adam', random_state=42)
+grid = GridSearchCV(mlp, param_grid, scoring='accuracy', cv=3)
+grid.fit(X_train, y_train)
+
+print("Best parameters (GridSearch):", grid.best_params_)
+print("Validation accuracy (GridSearch):", grid.score(X_val, y_val))
+
+# Plot PSO fitness (1 - accuracy) over generations
+plt.figure(figsize=(8,5))
+plt.plot(fitness_history, marker='o')
+plt.title("PSO Fitness Convergence")
+plt.xlabel("Generation")
+plt.ylabel("Fitness (1 - Accuracy)")
+plt.grid(True)
+plt.show()
+
+# === Store best PSO accuracy from fitness ===
+pso_accuracy = 1 - best_fitness
+grid_accuracy = grid.score(X_val, y_val)
+
+# === Bar Chart: Compare PSO and GridSearch Accuracy ===
+plt.figure(figsize=(6, 4))
+plt.bar(['GridSearch', 'PSO'], [grid_accuracy, pso_accuracy], color=['skyblue', 'lightgreen'])
+plt.title("Validation Accuracy Comparison")
+plt.ylabel("Accuracy")
+plt.ylim(0.95, 1.0)
+plt.grid(axis='y')
+plt.tight_layout()
+plt.show()
