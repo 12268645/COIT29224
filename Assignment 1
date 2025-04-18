@@ -1,1 +1,175 @@
+### ============================
+# Heart Disease PSO vs Random Search Neural Network
+# Assignment 1 - Fresh Build
+### ============================
+
+import numpy as np
+import matplotlib.pyplot as plt
+import random
+from sklearn.datasets import fetch_openml
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import accuracy_score
+from scipy.stats import uniform, randint
+
+# ===============================
+# Load and preprocess dataset
+# ===============================
+
+def load_preprocess_data():
+    # Correct dataset name is 'heart-statlog'
+    data = fetch_openml(name='heart-statlog', version=1, as_frame=True)
+    X = data.data.select_dtypes(include=[np.number])  # only numeric columns
+    y = data.target
+    y = y.astype('category').cat.codes  # Convert categorical target to 0/1
+
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X)
+
+    return train_test_split(X, y, test_size=0.2, random_state=42)
+
+
+# ===============================
+# Traditional Random Search NN
+# ===============================
+
+def traditional_random_search(X_train, X_val, y_train, y_val):
+    param_dist = {
+        'hidden_layer_sizes': [(50,), (100,), (50, 50), (100, 50)],
+        'activation': ['tanh', 'relu'],
+        'solver': ['adam'],
+        'alpha': uniform(0.0001, 0.01),
+        'learning_rate_init': uniform(0.0001, 0.01)
+    }
+
+    mlp = MLPClassifier(max_iter=500, random_state=42)
+    random_search = RandomizedSearchCV(mlp, param_distributions=param_dist, n_iter=10, cv=3, random_state=42, n_jobs=-1)
+    random_search.fit(X_train, y_train)
+
+    best_model = random_search.best_estimator_
+    y_pred = best_model.predict(X_val)
+    accuracy = accuracy_score(y_val, y_pred)
+
+    return best_model, accuracy
+
+# ===============================
+# PSO Optimized Neural Network
+# ===============================
+
+class PSO:
+    def __init__(self, X_train, X_val, y_train, y_val, swarm_size=10, dimensions=3, informants=3, generations=20):
+        self.X_train = X_train
+        self.X_val = X_val
+        self.y_train = y_train
+        self.y_val = y_val
+        self.swarm_size = swarm_size
+        self.dimensions = dimensions  # learning rate, hidden layer size, alpha
+        self.informants = informants
+        self.generations = generations
+        self.swarm = []
+        self.best_global_fitness = float('inf')
+        self.best_global_position = None
+        self.convergence_curve = []
+
+    class Particle:
+        def __init__(self, dimensions):
+            self.position = np.random.rand(dimensions)
+            self.velocity = np.random.uniform(-0.1, 0.1, dimensions)
+            self.best_position = np.copy(self.position)
+            self.best_fitness = float('inf')
+
+    def decode_particle(self, particle):
+        learning_rate = 0.0001 + particle[0] * (0.01 - 0.0001)
+        hidden_layer_size = int(10 + particle[1] * (100 - 10))
+        alpha = 0.0001 + particle[2] * (0.01 - 0.0001)
+        return learning_rate, hidden_layer_size, alpha
+
+    def fitness(self, particle):
+        lr, hidden_size, alpha = self.decode_particle(particle)
+        model = MLPClassifier(hidden_layer_sizes=(hidden_size,), activation='relu', solver='adam',
+                              alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=42)
+        model.fit(self.X_train, self.y_train)
+        preds = model.predict(self.X_val)
+        acc = accuracy_score(self.y_val, preds)
+        return 1 - acc  # Because PSO minimizes fitness
+
+    def initialize_swarm(self):
+        self.swarm = [self.Particle(self.dimensions) for _ in range(self.swarm_size)]
+
+    def optimize(self):
+        w = 0.5
+        c1 = c2 = 1.5
+
+        self.initialize_swarm()
+
+        for gen in range(self.generations):
+            for particle in self.swarm:
+                fitness_value = self.fitness(particle.position)
+
+                if fitness_value < particle.best_fitness:
+                    particle.best_fitness = fitness_value
+                    particle.best_position = np.copy(particle.position)
+
+                if fitness_value < self.best_global_fitness:
+                    self.best_global_fitness = fitness_value
+                    self.best_global_position = np.copy(particle.position)
+
+            for particle in self.swarm:
+                r1, r2 = np.random.rand(self.dimensions), np.random.rand(self.dimensions)
+                cognitive = c1 * r1 * (particle.best_position - particle.position)
+                social = c2 * r2 * (self.best_global_position - particle.position)
+                particle.velocity = w * particle.velocity + cognitive + social
+                particle.position += particle.velocity
+                particle.position = np.clip(particle.position, 0, 1)
+
+            self.convergence_curve.append(self.best_global_fitness)
+
+    def get_best_model(self):
+        lr, hidden_size, alpha = self.decode_particle(self.best_global_position)
+        model = MLPClassifier(hidden_layer_sizes=(hidden_size,), activation='relu', solver='adam',
+                              alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=42)
+        model.fit(self.X_train, self.y_train)
+        return model
+
+# ===============================
+# Main Execution
+# ===============================
+
+def main():
+    X_train, X_val, y_train, y_val = load_preprocess_data()
+
+    print("Training Random Search Neural Network...")
+    random_model, random_accuracy = traditional_random_search(X_train, X_val, y_train, y_val)
+
+    print("Training PSO-Optimized Neural Network...")
+    pso = PSO(X_train, X_val, y_train, y_val)
+    pso.optimize()
+    pso_model = pso.get_best_model()
+    y_pred_pso = pso_model.predict(X_val)
+    pso_accuracy = accuracy_score(y_val, y_pred_pso)
+
+    print(f"Random Search NN Accuracy: {random_accuracy:.4f}")
+    print(f"PSO Optimized NN Accuracy: {pso_accuracy:.4f}")
+
+    # Plot convergence curve
+    plt.figure()
+    plt.plot(pso.convergence_curve)
+    plt.title('PSO Convergence Curve')
+    plt.xlabel('Generations')
+    plt.ylabel('Best Fitness (1 - Accuracy)')
+    plt.grid()
+    plt.show()
+
+    # Bar chart comparison
+    plt.figure()
+    plt.bar(['Random Search', 'PSO'], [random_accuracy, pso_accuracy])
+    plt.title('Accuracy Comparison')
+    plt.ylabel('Accuracy')
+    plt.ylim(0, 1)
+    plt.grid(axis='y')
+    plt.show()
+
+if __name__ == "__main__":
+    main()
 
