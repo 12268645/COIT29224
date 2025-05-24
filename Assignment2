@@ -6,17 +6,19 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Callable
 import copy
+from typing import Callable
 
-# Define the Rastrigin fitness function
+# Set seed for reproducibility
+np.random.seed(42)
+
+# Rastrigin fitness function
 def rastrigin(X: np.ndarray) -> float:
     A = 10
     return A * len(X) + sum([(x ** 2 - A * np.cos(2 * np.pi * x)) for x in X])
 
-
+# ========== (1+1)-ES ==========
 class OnePlusOneES:
-    """(1+1)-Evolution Strategy with fixed sigma"""
     def __init__(self, fitness_function: Callable[[np.ndarray], float], dimension=2, sigma=0.3, max_generations=500, bounds=(-5.12, 5.12)):
         self.fitness_function = fitness_function
         self.dimension = dimension
@@ -38,10 +40,8 @@ class OnePlusOneES:
             self.history.append(parent_fitness)
         return parent, parent_fitness
 
-
-
+# ========== (1+1)-ES with 1/5th Rule ==========
 class OnePlusOneES_1FifthRule:
-    """(1+1)-ES with 1/5th rule to adapt sigma"""
     def __init__(self, fitness_function: Callable[[np.ndarray], float], dimension=2, sigma=0.3, max_generations=500, bounds=(-5.12, 5.12), adapt_interval=10, adapt_const=0.85):
         self.fitness_function = fitness_function
         self.dimension = dimension
@@ -74,10 +74,8 @@ class OnePlusOneES_1FifthRule:
                 success_count = 0
         return parent, parent_fitness
 
-
-
+# ========== CMA-ES ==========
 class StrategyOnePlusLambda:
-    """CMA-ES strategy (1 + lambda) with covariance matrix adaptation"""
     def __init__(self, parent, sigma, lambda_=4):
         self.parent = np.array(parent)
         self.sigma = sigma
@@ -113,49 +111,49 @@ class StrategyOnePlusLambda:
         else:
             self.pc = (1 - self.cc) * self.pc
             self.C = (1 - self.ccov) * self.C + self.ccov * (np.outer(self.pc, self.pc) + self.cc * (2 - self.cc) * self.C)
-        self.sigma *= np.exp((self.psucc - self.ptarg) / ((1.0 - self.ptarg) * self.d)) 
+        self.sigma *= np.exp((self.psucc - self.ptarg) / ((1.0 - self.ptarg) * self.d))
 
+# ================= RUN EXPERIMENTS =================
 
-# Run basic (1+1)-ES
-es = OnePlusOneES(fitness_function=rastrigin, dimension=2)
-sol, fit = es.evolve()
+# (1+1)-ES
+es = OnePlusOneES(fitness_function=rastrigin)
+sol_es, fit_es = es.evolve()
 plt.plot(es.history)
 plt.title("(1+1)-ES Convergence")
 plt.xlabel("Generation")
 plt.ylabel("Fitness")
 plt.grid(True)
 plt.show()
-print("Best solution:", sol)
-print("Best fitness:", fit)
+print("Best solution (1+1-ES):", sol_es)
+print("Best fitness (1+1-ES):", fit_es)
 
-
-# Run (1+1)-ES with 1/5th rule
-es_adapt = OnePlusOneES_1FifthRule(fitness_function=rastrigin, dimension=2)
-sol_a, fit_a = es_adapt.evolve()
-plt.plot(es_adapt.history)
+# (1+1)-ES with 1/5th Rule
+es_1fifth = OnePlusOneES_1FifthRule(fitness_function=rastrigin)
+sol_1fifth, fit_1fifth = es_1fifth.evolve()
+plt.plot(es_1fifth.history)
 plt.title("(1+1)-ES with 1/5th Rule Convergence")
 plt.xlabel("Generation")
 plt.ylabel("Fitness")
 plt.grid(True)
 plt.show()
-print("Best solution (adaptive):", sol_a)
-print("Best fitness (adaptive):", fit_a)
+print("Best solution (adaptive):", sol_1fifth)
+print("Best fitness (adaptive):", fit_1fifth)
 
-
-# Run CMA-ES
+# CMA-ES
+np.random.seed(42)
 parent = np.random.uniform(-5.12, 5.12, 2)
 cma = StrategyOnePlusLambda(parent=parent, sigma=0.5, lambda_=4)
-history = []
-for _ in range(100):
+history_cma = []
+for _ in range(300):  # more generations for better convergence
     offspring = cma.generate()
     fitnesses = [rastrigin(ind) for ind in offspring]
     cma.update(offspring, fitnesses)
-    history.append(rastrigin(cma.parent))
-plt.plot(history)
+    history_cma.append(rastrigin(cma.parent))
+plt.plot(history_cma)
 plt.title("CMA-ES Convergence")
 plt.xlabel("Generation")
 plt.ylabel("Fitness")
 plt.grid(True)
 plt.show()
 print("Best CMA-ES solution:", cma.parent)
-print("Best CMA-ES fitness:", history[-1])
+print("Best CMA-ES fitness:", history_cma[-1])
